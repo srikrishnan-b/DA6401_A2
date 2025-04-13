@@ -1,0 +1,15 @@
+aug = True
+batch_size = 16
+optim = "adam"
+filters = [64, 64, 64, 64, 64]
+kernel = [5, 5, 5, 5, 5]
+pool_kernel = [3, 3, 3, 3, 3]
+pool_stride = [1, 1, 1, 1, 2]
+batchnorm = True
+activation = "mish"
+dropout = 0.4
+ffn_size = 256
+lr = 0.00005
+epochs = 5
+data_dir = "../../nature_12K/inaturalist_12K"
+NUM_WORKERS = 1

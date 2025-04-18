@@ -8,11 +8,11 @@ from torchmetrics import Accuracy
 from lightning.pytorch.loggers import WandbLogger
 import torchvision.models as models
 from lightning.pytorch.callbacks import BaseFinetuning
-from torchvision.models import (
-    
-    resnet50,
-    vgg11,
-)
+from torchvision.models import resnet50
+from src.dataloader import iNat_dataset
+from src.config import *
+from src.sweep_config import *
+import gc
 
 
 # CNN model
@@ -231,9 +231,9 @@ class pretrained_light(pl.LightningModule):
     def __init__(self, model: str, optim: str, n_classes, lr):
         super().__init__()
         self.optim = optim
-        self.ptmodel= model
+        self.ptmodel = model
         self.save_hyperparameters()
-        self.model = load_torch_models(model, n_classes)
+        self.model = load_torch_model(n_classes)
         self.lr = lr
         self.train_accuracy = Accuracy(task="multiclass", num_classes=n_classes)
         self.val_accuracy = Accuracy(task="multiclass", num_classes=n_classes)
@@ -242,11 +242,10 @@ class pretrained_light(pl.LightningModule):
     def forward(self, x):
         return self.model(x)
 
-
     def training_step(self, batch, batch_idx):
         x, y = batch
         logits = self(x)
-        
+
         loss = self.loss_fn(logits, y)
         acc = self.train_accuracy(logits, y)
         self.log("train loss", loss, on_step=False, on_epoch=True)
@@ -276,51 +275,126 @@ class pretrained_light(pl.LightningModule):
 
     def configure_optimizers(self):
 
-        optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.parameters()))
+        optimizer = torch.optim.Adam(
+            filter(lambda p: p.requires_grad, self.parameters())
+        )
         return optimizer
 
+
 class Unfreeze_after_epochs(BaseFinetuning):
-    def __init__(self, unfreeze_at_epoch=10):
+    def __init__(self, unfreeze_at_epoch=[5]):
         super().__init__()
         self._unfreeze_at_epoch = unfreeze_at_epoch
         self._to_freeze = None
 
     def freeze_before_training(self, pl_module):
-      to_freeze = [pl_module.model.conv1,
-                   pl_module.model.bn1,
-                   pl_module.model.layer1, 
-                   pl_module.model.layer2,
-                   pl_module.model.layer3             
-                   ]
-      self._to_freeze = to_freeze
-      self.freeze(modules = to_freeze)
-      self.make_trainable(pl_module.model.fc)
+        to_freeze = [
+            pl_module.model.conv1,
+            pl_module.model.bn1,
+            pl_module.model.layer1,
+            pl_module.model.layer2,
+            pl_module.model.layer3,
+        ]
+        self._to_freeze = to_freeze
+        self.freeze(modules=to_freeze)
+        self.make_trainable(pl_module.model.fc)
 
     def finetune_function(self, pl_module, current_epoch, optimizer):
-      if current_epoch == self._unfreeze_at_epoch:
-        self.unfreeze_and_add_param_group(modules = self._to_freeze,
-                                          optimizer=optimizer, train_bn=True, lr=pl_module.lr*0.1)
+
+        if current_epoch == self._unfreeze_at_epoch[0]:
+            print("Unfreezing layer 3")
+            self.unfreeze_and_add_param_group(
+                modules=self._to_freeze[-1],
+                optimizer=optimizer,
+                train_bn=True,
+                lr=pl_module.lr * 0.1,
+            )
+
+        elif current_epoch == self._unfreeze_at_epoch[1]:
+            print("Unfreezing layer 2")
+
+            self.unfreeze_and_add_param_group(
+                modules=self._to_freeze[-2],
+                optimizer=optimizer,
+                train_bn=True,
+                lr=pl_module.lr * 0.01,
+            )
+
+        elif current_epoch == self._unfreeze_at_epoch[2]:
+            print("Unfreezing layer 1")
+            self.unfreeze_and_add_param_group(
+                modules=self._to_freeze[-3],
+                optimizer=optimizer,
+                train_bn=True,
+                lr=pl_module.lr * 0.01,
+            )
 
 
+def load_torch_model(n_classes):
+
+    model = resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
+    # model.fc = nn.Linear(model.fc.in_features, n_classes)
+    model.fc = nn.Sequential(
+        nn.Linear(in_features=model.fc.in_features, out_features=1024),
+        nn.BatchNorm1d(1024),
+        nn.ReLU(),
+        nn.Dropout(0.4),
+        nn.Linear(1024, 512),
+        nn.BatchNorm1d(512),
+        nn.ReLU(),
+        nn.Dropout(0.4),
+        nn.Linear(512, n_classes),
+    )
+
+    return model
 
 
+def trainCNN(config=None):
+    with wandb.init(config=config) as run:
+        config = wandb.config
 
-def load_torch_models(model, n_classes):
+        run.name = f"A_{config.augmentation}_D_{config.dropout:.2f}_bn_{config.batchnorm}_ffn_{config.ffn_size}"
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
+        try:
+            # Getting train, validation, and test dataloaders
+            dataset = iNat_dataset(
+                data_dir=data_dir,
+                augmentation=aug,
+                batch_size=batch_size,
+                NUM_WORKERS=NUM_WORKERS,
+            )
+            train_dataloader, val_dataloader, _, n_classes = dataset.load_dataset()
+            # Model
+            model = CNN_light(
+                optim=config.optim,
+                filters=config.filters,
+                kernel=config.kernel,
+                pool_kernel=config.pool_kernel,
+                pool_stride=config.pool_stride,
+                batchnorm=config.batchnorm,
+                activation=config.activation,
+                dropout=config.dropout,
+                ffn_size=config.ffn_size,
+                n_classes=n_classes,
+                lr=config.lr,
+            )
+            logger = WandbLogger(
+                project=project_name, name=run.name, experiment=run, log_model=False
+            )
+            trainer = pl.Trainer(
+                devices=1,
+                accelerator="auto",
+                precision="16-mixed",
+                gradient_clip_val=1.0,
+                max_epochs=config.epochs,
+                logger=logger,
+                profiler=None,
+            )
 
-    if model == "resnet50":
-
-        model = resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
-        model.fc = nn.Linear(model.fc.in_features, n_classes)
-        return model
-
-
-    elif model=='vgg11':
-        model = vgg11(weights=models.VGG11_Weights.IMAGENET1K_V1)
-        model.classifier[6] = nn.Linear(model.classifier[6].in_features, n_classes)
-        return model
-
-
-
-    
-
-
+            trainer.fit(model, train_dataloader, val_dataloader)
+        finally:
+            del trainer
+            del model
+            gc.collect()
+            torch.cuda.empty_cache()

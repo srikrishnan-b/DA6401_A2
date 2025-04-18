@@ -10,6 +10,10 @@ activation = "mish"
 dropout = 0.4
 ffn_size = 256
 lr = 0.00005
-epochs = 5
+epochs = 15
 data_dir = "../../nature_12K/inaturalist_12K"
 NUM_WORKERS = 1
+
+project_name = "best_model"
+run_name = "best_model"
+unfreeze_at_epoch = [5, 7, 12]

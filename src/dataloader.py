@@ -50,7 +50,7 @@ class iNat_dataset:
             root=os.path.join(self.DATA_DIR, "train")
         )
         test_dataset = torchvision.datasets.ImageFolder(
-            root=os.path.join(self.DATA_DIR, "val")
+            root=os.path.join(self.DATA_DIR, "val", transform=test_transform)
         )
 
         # Getting labels and random splitting/shuffling of each class examples
@@ -99,27 +99,30 @@ class iNat_dataset:
         return train_dataloader, val_dataloader, test_dataloader, n_classes
 
     # Function to apply transformations to the dataset
-    def transforms(self, augmentation):
+    def transforms(augmentation):  
         if augmentation:
             transform = v2.Compose(
-                [
-                    v2.Resize((256, 256)),
-                    v2.RandomHorizontalFlip(p=0.4),
-                    v2.ColorJitter(brightness=0.2, contrast=0.2),
-                    v2.ToImage(),
-                    v2.ToDtype(torch.float32, scale=True),
-                    v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-                ]
-            )
+            [v2.Resize((256, 256)),
+                v2.RandomHorizontalFlip(p=0.4),
+                v2.RandomVerticalFlip(p=0.1),
+                v2.RandomApply(
+                [v2.RandomRotation(degrees=15)],
+                p=0.1
+                ),
+                v2.RandomApply(
+                [v2.ColorJitter(brightness=0.2, contrast=0.2,
+                                saturation=0.2, hue=0.1)],
+                p=0.5
+                ),
+                #v2.ColorJitter(brightness=0.2, contrast=0.2),
+                v2.ToImage(), v2.ToDtype(torch.float32, scale=True),
+                v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
         else:
-            transform = v2.Compose(
-                [
-                    v2.Resize((256, 256)),
-                    v2.ToImage(),
-                    v2.ToDtype(torch.float32, scale=True),
-                    v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-                ]
-            )
+                transform = v2.Compose(
+                [v2.Resize((256, 256)),
+                v2.ToImage(), v2.ToDtype(torch.float32, scale=True),
+                v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
+            
 
         return transform
 

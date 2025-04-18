@@ -7,14 +7,11 @@ import lightning as pl
 from torchmetrics import Accuracy
 from lightning.pytorch.loggers import WandbLogger
 import torchvision.models as models
+from lightning.pytorch.callbacks import BaseFinetuning
 from torchvision.models import (
-    googlenet,
-    GoogLeNet_Weights,
+    
     resnet50,
     vgg11,
-    inception_v3,
-    efficientnet_v2_s,
-    vit_b_16,
 )
 
 
@@ -231,11 +228,13 @@ class CNN_light(pl.LightningModule):
 
 # Pytorch lighnting implementation of model with pretrained weights
 class pretrained_light(pl.LightningModule):
-    def __init__(self, model: str, finetune_strat: str, optim: str, n_classes, lr):
+    def __init__(self, model: str, optim: str, n_classes, lr):
         super().__init__()
         self.optim = optim
+        self.ptmodel= model
         self.save_hyperparameters()
-        self.model = load_torch_models(model, finetune_strat, n_classes)
+        self.model = load_torch_models(model, n_classes)
+        self.lr = lr
         self.train_accuracy = Accuracy(task="multiclass", num_classes=n_classes)
         self.val_accuracy = Accuracy(task="multiclass", num_classes=n_classes)
         self.loss_fn = nn.CrossEntropyLoss()
@@ -243,9 +242,11 @@ class pretrained_light(pl.LightningModule):
     def forward(self, x):
         return self.model(x)
 
+
     def training_step(self, batch, batch_idx):
         x, y = batch
         logits = self(x)
+        
         loss = self.loss_fn(logits, y)
         acc = self.train_accuracy(logits, y)
         self.log("train loss", loss, on_step=False, on_epoch=True)
@@ -274,92 +275,52 @@ class pretrained_light(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        if self.optim == "sgd":
-            optimizer = torch.optim.SGD(
-                self.parameters(), lr=self.hparams.lr, momentum=0.9
-            )
-        elif self.optim == "adam":
-            optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
+
+        optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.parameters()))
         return optimizer
 
+class Unfreeze_after_epochs(BaseFinetuning):
+    def __init__(self, unfreeze_at_epoch=10):
+        super().__init__()
+        self._unfreeze_at_epoch = unfreeze_at_epoch
+        self._to_freeze = None
 
-def load_torch_models(model, finetune_strat, n_classes):
-    # TODO finetune strategies
-    if model == "googlenet":
-        googlenet_model = googlenet(
-            weights=GoogLeNet_Weights.IMAGENET1K_V1, aux_logits=False
-        )
-        for param in googlenet_model.parameters():
-            param.requires_grad = False
-        for param in googlenet_model.fc.parameters():
-            param.requires_grad = True
+    def freeze_before_training(self, pl_module):
+      to_freeze = [pl_module.model.conv1,
+                   pl_module.model.bn1,
+                   pl_module.model.layer1, 
+                   pl_module.model.layer2,
+                   pl_module.model.layer3             
+                   ]
+      self._to_freeze = to_freeze
+      self.freeze(modules = to_freeze)
+      self.make_trainable(pl_module.model.fc)
 
-        googlenet_model.fc = nn.Linear(
-            in_features=googlenet_model.fc.in_features, out_features=n_classes
-        )
+    def finetune_function(self, pl_module, current_epoch, optimizer):
+      if current_epoch == self._unfreeze_at_epoch:
+        self.unfreeze_and_add_param_group(modules = self._to_freeze,
+                                          optimizer=optimizer, train_bn=True, lr=pl_module.lr*0.1)
 
-        return googlenet_model
 
-    elif model == "resnet50":
-        resnet_model = resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
-        for param in resnet_model.parameters():
-            param.requires_grad = False
-        for param in resnet_model.fc.parameters():
-            param.requires_grad = True
-        resnet_model.fc = nn.Linear(
-            in_features=resnet_model.fc.in_features, out_features=n_classes
-        )
 
-        return resnet_model
 
-    elif model == "vgg11":
-        vgg_model = vgg11(weights=models.VGG11_Weights.IMAGENET1K_V1)
-        for param in vgg_model.parameters():
-            param.requires_grad = False
-        for param in vgg_model.classifier.parameters():
-            param.requires_grad = True
-        vgg_model.classifier[6] = nn.Linear(
-            in_features=vgg_model.classifier[6].in_features, out_features=n_classes
-        )
 
-        return vgg_model
+def load_torch_models(model, n_classes):
 
-    elif model == "inception":
-        inception_model = inception_v3(
-            weights=models.Inception_V3_Weights.IMAGENET1K_V1, aux_logits=True
-        )
-        for param in inception_model.parameters():
-            param.requires_grad = False
-        for param in inception_model.fc.parameters():
-            param.requires_grad = True
-        inception_model.fc = nn.Linear(
-            in_features=inception_model.fc.in_features, out_features=n_classes
-        )
+    if model == "resnet50":
 
-        return inception_model
+        model = resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
+        model.fc = nn.Linear(model.fc.in_features, n_classes)
+        return model
 
-    elif model == "efficient":
-        efficientnet_model = efficientnet_v2_s(
-            weights=models.EfficientNet_V2_S_Weights.IMAGENET1K_V1
-        )
-        for param in efficientnet_model.parameters():
-            param.requires_grad = False
-        for param in efficientnet_model.fc.parameters():
-            param.requires_grad = True
-        efficientnet_model.classifier[1] = nn.Linear(
-            in_features=efficientnet_model.classifier[1].in_features,
-            out_features=n_classes,
-        )
 
-        return efficientnet_model
+    elif model=='vgg11':
+        model = vgg11(weights=models.VGG11_Weights.IMAGENET1K_V1)
+        model.classifier[6] = nn.Linear(model.classifier[6].in_features, n_classes)
+        return model
 
-    elif model == "visiontransformer":
-        vit_model = vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_V1)
-        for param in vit_model.parameters():
-            param.requires_grad = False
-        for param in vit_model.fc.parameters():
-            param.requires_grad = True
-        vit_model.head[0] = nn.Linear(
-            in_features=vit_model.head[0].in_features, out_features=n_classes
-        )
-        return vit_model
+
+
+    
+
+

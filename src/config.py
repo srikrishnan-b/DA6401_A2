@@ -16,4 +16,4 @@ NUM_WORKERS = 1
 
 project_name = "best_model"
 run_name = "best_model"
-unfreeze_at_epoch = [5, 7, 12]
+unfreeze_at_epoch = [3]

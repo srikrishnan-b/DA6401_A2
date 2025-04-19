@@ -1,5 +1,7 @@
-# Loading the required libraries
+"""This file contains codes for pytorch lighting implementation of CNN model, Finetuning model, and training routine for sweep"""
 
+
+# Loading the required libraries
 import torch
 import wandb
 from torch import nn
@@ -15,6 +17,7 @@ from src.sweep_config import *
 import gc
 
 
+#==============================================================================================================
 # CNN model
 class CNN(nn.Module):
     def __init__(
@@ -41,7 +44,7 @@ class CNN(nn.Module):
             pool_stride[0],
             self.act,
             batchnorm,
-            dropout,
+            
         )
         self.convblock2 = self._convblock(
             filters[0],
@@ -51,7 +54,6 @@ class CNN(nn.Module):
             pool_stride[1],
             self.act,
             batchnorm,
-            dropout,
         )
         self.convblock3 = self._convblock(
             filters[1],
@@ -61,7 +63,6 @@ class CNN(nn.Module):
             pool_stride[2],
             self.act,
             batchnorm,
-            dropout,
         )
         self.convblock4 = self._convblock(
             filters[2],
@@ -71,7 +72,6 @@ class CNN(nn.Module):
             pool_stride[3],
             self.act,
             batchnorm,
-            dropout,
         )
         self.convblock5 = self._convblock(
             filters[3],
@@ -81,7 +81,6 @@ class CNN(nn.Module):
             pool_stride[4],
             self.act,
             batchnorm,
-            dropout,
         )
         if batchnorm:
             self.batch_norm = nn.BatchNorm1d(num_features=ffn_size)
@@ -92,6 +91,8 @@ class CNN(nn.Module):
         self.fc = nn.LazyLinear(ffn_size)
         self.out = nn.Linear(ffn_size, num_classes)
 
+
+    ## Convolutional block is defined with conv layer, batchnorm, activation and maxpooling 
     def _convblock(
         self,
         input,
@@ -101,7 +102,7 @@ class CNN(nn.Module):
         pool_stride,
         activation_fn,
         batchnorm,
-        dropout,
+        
     ):
 
         if batchnorm:
@@ -109,14 +110,12 @@ class CNN(nn.Module):
                 nn.Conv2d(input, output, kernel),
                 activation_fn,
                 nn.BatchNorm2d(output),
-                # nn.Dropout(dropout),
                 nn.MaxPool2d(pool_kernel, pool_stride),
             )
         else:
             return nn.Sequential(
                 nn.Conv2d(input, output, kernel),
                 activation_fn,
-                # nn.Dropout(dropout),
                 nn.MaxPool2d(pool_kernel, pool_stride),
             )
 
@@ -146,6 +145,8 @@ class CNN(nn.Module):
         x = self.dropout(x)
         x = self.out(x)
         return x
+
+# ===============================================================================================================
 
 
 # Pytorch lighnting implementation of model
@@ -225,130 +226,9 @@ class CNN_light(pl.LightningModule):
             optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
         return optimizer
 
+# ================================================================================================================
 
-# Pytorch lighnting implementation of model with pretrained weights
-class pretrained_light(pl.LightningModule):
-    def __init__(self, model: str, optim: str, n_classes, lr):
-        super().__init__()
-        self.optim = optim
-        self.ptmodel = model
-        self.save_hyperparameters()
-        self.model = load_torch_model(n_classes)
-        self.lr = lr
-        self.train_accuracy = Accuracy(task="multiclass", num_classes=n_classes)
-        self.val_accuracy = Accuracy(task="multiclass", num_classes=n_classes)
-        self.loss_fn = nn.CrossEntropyLoss()
-
-    def forward(self, x):
-        return self.model(x)
-
-    def training_step(self, batch, batch_idx):
-        x, y = batch
-        logits = self(x)
-
-        loss = self.loss_fn(logits, y)
-        acc = self.train_accuracy(logits, y)
-        self.log("train loss", loss, on_step=False, on_epoch=True)
-        self.log("train accuracy", acc, on_step=False, on_epoch=True)
-
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        x, y = batch
-        logits = self(x)
-        loss = self.loss_fn(logits, y)
-        acc = self.val_accuracy(logits, y)
-        self.log("val loss", loss, on_step=False, on_epoch=True)
-        self.log("val accuracy", acc, on_step=False, on_epoch=True)
-
-        return loss
-
-    def test_step(self, batch, batch_idx):
-        x, y = batch
-        logits = self(x)
-        loss = self.loss_fn(logits, y)
-        acc = self.val_accuracy(logits, y)
-        self.log("test loss", loss, on_step=False, on_epoch=True)
-        self.log("test accuracy", acc, on_step=False, on_epoch=True)
-
-        return loss
-
-    def configure_optimizers(self):
-
-        optimizer = torch.optim.Adam(
-            filter(lambda p: p.requires_grad, self.parameters())
-        )
-        return optimizer
-
-
-class Unfreeze_after_epochs(BaseFinetuning):
-    def __init__(self, unfreeze_at_epoch=[5]):
-        super().__init__()
-        self._unfreeze_at_epoch = unfreeze_at_epoch
-        self._to_freeze = None
-
-    def freeze_before_training(self, pl_module):
-        to_freeze = [
-            pl_module.model.conv1,
-            pl_module.model.bn1,
-            pl_module.model.layer1,
-            pl_module.model.layer2,
-            pl_module.model.layer3,
-        ]
-        self._to_freeze = to_freeze
-        self.freeze(modules=to_freeze)
-        self.make_trainable(pl_module.model.fc)
-
-    def finetune_function(self, pl_module, current_epoch, optimizer):
-
-        if current_epoch == self._unfreeze_at_epoch[0]:
-            print("Unfreezing layer 3")
-            self.unfreeze_and_add_param_group(
-                modules=self._to_freeze[-1],
-                optimizer=optimizer,
-                train_bn=True,
-                lr=pl_module.lr * 0.1,
-            )
-
-        elif current_epoch == self._unfreeze_at_epoch[1]:
-            print("Unfreezing layer 2")
-
-            self.unfreeze_and_add_param_group(
-                modules=self._to_freeze[-2],
-                optimizer=optimizer,
-                train_bn=True,
-                lr=pl_module.lr * 0.01,
-            )
-
-        elif current_epoch == self._unfreeze_at_epoch[2]:
-            print("Unfreezing layer 1")
-            self.unfreeze_and_add_param_group(
-                modules=self._to_freeze[-3],
-                optimizer=optimizer,
-                train_bn=True,
-                lr=pl_module.lr * 0.01,
-            )
-
-
-def load_torch_model(n_classes):
-
-    model = resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
-    # model.fc = nn.Linear(model.fc.in_features, n_classes)
-    model.fc = nn.Sequential(
-        nn.Linear(in_features=model.fc.in_features, out_features=1024),
-        nn.BatchNorm1d(1024),
-        nn.ReLU(),
-        nn.Dropout(0.4),
-        nn.Linear(1024, 512),
-        nn.BatchNorm1d(512),
-        nn.ReLU(),
-        nn.Dropout(0.4),
-        nn.Linear(512, n_classes),
-    )
-
-    return model
-
-
+# Function to train the model
 def trainCNN(config=None):
     with wandb.init(config=config) as run:
         config = wandb.config
@@ -400,3 +280,117 @@ def trainCNN(config=None):
             del model
             gc.collect()
             torch.cuda.empty_cache()
+
+# ===============================================================================================================
+
+
+
+
+# Pytorch lighnting implementation of model with pretrained weights
+class pretrained_light(pl.LightningModule):
+    def __init__(self, model: str, optim: str, n_classes, lr):
+        super().__init__()
+        self.optim = optim
+        self.save_hyperparameters()
+        self.model = load_torch_model(n_classes)                   # Load resnet50
+        self.lr = lr
+        self.train_accuracy = Accuracy(task="multiclass", num_classes=n_classes)
+        self.val_accuracy = Accuracy(task="multiclass", num_classes=n_classes)
+        self.loss_fn = nn.CrossEntropyLoss()
+
+    def forward(self, x):
+        return self.model(x)
+
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        logits = self(x)
+
+        loss = self.loss_fn(logits, y)
+        acc = self.train_accuracy(logits, y)
+        self.log("train loss", loss, on_step=False, on_epoch=True)
+        self.log("train accuracy", acc, on_step=False, on_epoch=True)
+
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        logits = self(x)
+        loss = self.loss_fn(logits, y)
+        acc = self.val_accuracy(logits, y)
+        self.log("val loss", loss, on_step=False, on_epoch=True)
+        self.log("val accuracy", acc, on_step=False, on_epoch=True)
+
+        return loss
+
+    def test_step(self, batch, batch_idx):
+        x, y = batch
+        logits = self(x)
+        loss = self.loss_fn(logits, y)
+        acc = self.val_accuracy(logits, y)
+        self.log("test loss", loss, on_step=False, on_epoch=True)
+        self.log("test accuracy", acc, on_step=False, on_epoch=True)
+
+        return loss
+
+    def configure_optimizers(self):
+        # filter parameters that are frozen
+        optimizer = torch.optim.Adam(
+            filter(lambda p: p.requires_grad, self.parameters())
+        )
+        return optimizer
+
+# ================================================================================================================
+
+# Callback to freeze and unfreeze layers in the pretrained model
+class Unfreeze_after_epochs(BaseFinetuning):
+    def __init__(self, unfreeze_at_epoch=[5]):
+        super().__init__()
+        self._unfreeze_at_epoch = unfreeze_at_epoch
+        self._to_freeze = None
+
+    def freeze_before_training(self, pl_module):
+        # Freeze all layers except the classifier 
+        to_freeze = [
+            pl_module.model.conv1,
+            pl_module.model.bn1,
+            pl_module.model.layer1,
+            pl_module.model.layer2,
+            pl_module.model.layer3,
+        ]
+        self._to_freeze = to_freeze
+        self.freeze(modules=to_freeze)
+        self.make_trainable(pl_module.model.fc)
+
+    def finetune_function(self, pl_module, current_epoch, optimizer):
+        # Unfreeze layers at specified epochs
+        if current_epoch == self._unfreeze_at_epoch[0]:
+            print("Unfreezing layer 3,2")
+            self.unfreeze_and_add_param_group(
+                modules=self._to_freeze[-2:],
+                optimizer=optimizer,
+                train_bn=True,
+                lr=pl_module.lr * 0.1,
+            )
+
+
+#================================================================================================================
+# Function to load the pretrained model
+def load_torch_model(n_classes):
+
+    model = resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
+    # Changing the final layer
+    model.fc = nn.Sequential(
+        nn.Linear(in_features=model.fc.in_features, out_features=1024),
+        nn.BatchNorm1d(1024),
+        nn.ReLU(),
+        nn.Dropout(0.4),
+        nn.Linear(1024, 512),
+        nn.BatchNorm1d(512),
+        nn.ReLU(),
+        nn.Dropout(0.4),
+        nn.Linear(512, n_classes),
+    )
+
+    return model
+
+#================================================================================================================

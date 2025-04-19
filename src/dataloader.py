@@ -13,7 +13,8 @@ g = torch.Generator()
 g.manual_seed(42)
 
 
-# Functions
+# Functions for augmentation / transformation
+# ============================================================================================================
 # Augmentation class
 class Augmentation(torch.utils.data.Dataset):
     def __init__(self, train_complete, indices, transform):
@@ -31,7 +32,9 @@ class Augmentation(torch.utils.data.Dataset):
             image = self.transform(image)
         return image, label
 
-
+#=============================================================================================================
+# Loading dataset
+#=============================================================================================================
 class iNat_dataset:
     def __init__(self, data_dir, augmentation, batch_size, NUM_WORKERS=0):
         self.DARA_DIR = data_dir
@@ -103,7 +106,7 @@ class iNat_dataset:
         if augmentation:
             transform = v2.Compose(
                 [
-                    v2.Resize((256, 256)),
+                    v2.Resize((224, 224)),
                     v2.RandomHorizontalFlip(p=0.4),
                     v2.RandomVerticalFlip(p=0.1),
                     v2.RandomApply([v2.RandomRotation(degrees=15)], p=0.1),
@@ -115,7 +118,7 @@ class iNat_dataset:
                         ],
                         p=0.5,
                     ),
-                    # v2.ColorJitter(brightness=0.2, contrast=0.2),
+                    
                     v2.ToImage(),
                     v2.ToDtype(torch.float32, scale=True),
                     v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
@@ -124,7 +127,7 @@ class iNat_dataset:
         else:
             transform = v2.Compose(
                 [
-                    v2.Resize((256, 256)),
+                    v2.Resize((224, 224)),
                     v2.ToImage(),
                     v2.ToDtype(torch.float32, scale=True),
                     v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
@@ -138,3 +141,6 @@ class iNat_dataset:
         worker_seed = torch.initial_seed() % 2**32
         np.random.seed(worker_seed)
         random.seed(worker_seed)
+
+
+#======================================================================================================

@@ -1,3 +1,6 @@
+## Contains configuration for sweep using wandb
+
+
 # Filter and kernel size descriptions for reference
 filters_des = {
     "same_8": [8, 8, 8, 8, 8],

@@ -63,6 +63,6 @@ The codes are organized in two folders: `src` and `notebooks`. `src` contains al
 
 
 
-### Link to wandb report: 
-### Link to Github repo: 
+### Link to wandb report: [Link](https://wandb.ai/deeplearn24/dla2-hypersweeps/reports/BT23S013-DA6401-Assignment-2--VmlldzoxMjI5OTUzMg?accessToken=bpcqz50a3d769f4n7xgc3wdyk8hspwqzluf2k79bee6sm1wqme9nd959bbdh7ikw)
+### Link to Github repo: [Link](https://github.com/srikrishnan-b/DA6401_A2)
  

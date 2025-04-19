@@ -364,7 +364,9 @@ def trainCNN(config=None):
                 batch_size=batch_size,
                 NUM_WORKERS=NUM_WORKERS,
             )
-            train_dataloader, val_dataloader, _, n_classes = dataset.load_dataset()
+            train_dataloader, val_dataloader, _, classes, n_classes = (
+                dataset.load_dataset()
+            )
             # Model
             model = CNN_light(
                 optim=config.optim,
